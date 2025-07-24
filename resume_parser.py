@@ -11,7 +11,6 @@ import tempfile
 # 🧠 Configure Google Gemini API
 import google.generativeai as genai
 
-from withJd import get_jd_match_score
 
 
 # Set your API key directly (replace with your real key)
@@ -252,7 +251,7 @@ if uploaded_file is not None:
             # Here you can add logic to compare parsed_output with job_description and compute a match score
             # For now, we'll just display a placeholder score
             match_score = 85  # Placeholder score
-            st.write(f"**Match Score:** {get_jd_match_score(job_description, parsed_output, "AIzaSyDXlJv-M3hiw-kLSWfpd0xQgk4Ssz7G8Fo")}/100")
+            #st.write(f"**Match Score:** {get_jd_match_score(job_description, parsed_output, "AIzaSyDXlJv-M3hiw-kLSWfpd0xQgk4Ssz7G8Fo")}/100")
 
     except Exception as e:
         st.error("⚠️ Failed to parse JSON output.")
