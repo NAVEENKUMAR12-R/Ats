@@ -1,4 +1,3 @@
-import streamlit as st
 import fitz  # PyMuPDF
 import google.generativeai as genai
 import os
@@ -8,13 +7,9 @@ from external_parameters import analyze_resume
 import re
 import tempfile
 
+
 # 🧠 Configure Google Gemini API
-import google.generativeai as genai
-
-
-
-# Set your API key directly (replace with your real key)
-genai.configure(api_key="AIzaSyDXlJv-M3hiw-kLSWfpd0xQgk4Ssz7G8Fo")
+genai.configure(api_key="AIzaSyC6Y49gb19VaiKuDOiCiV8RBeQ12TisKOQ")
 
 # 📝 Gemini Prompt Template
 PROMPT_TEMPLATE = """
@@ -65,13 +60,13 @@ Extract and organize the candidate's information into the following *exact JSON 
       "date": "...",
       "responsibilities": ["..."]
     }
-  ]
+  ],
+  "Achievements": ["..."],  // Empty array if non
 }
 
 ---
 
 ### Step 2: Resume Evaluation - Atomic-Level Scoring (100 Points Total)
-
 1. SECTION HEADINGS (15 pts)
    15 = All 6 standard sections with exact headers
    12 = 1 non-standard header (e.g., "My Journey")
@@ -191,97 +186,83 @@ Return only this JSON structure — no extra comments, headings, or notes:
 Now, analyze the resume below:
 
 {resume_text}
-
 """
 
-# 📤 Extract text from PDF using PyMuPDF
 def extract_text_from_pdf(file_bytes):
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     resume_text = "\n".join(page.get_text() for page in doc)
     return resume_text
 
-# 🤖 Ask Gemini to parse the resume
 def parse_resume_with_gemini(resume_text):
     model = genai.GenerativeModel('gemini-1.5-flash')
     prompt = PROMPT_TEMPLATE.replace("{resume_text}", resume_text)
     response = model.generate_content(prompt)
-    # Clean any code block backticks (```json or ```)
-    clean_text = re.sub(r"^```(?:json)?|```$", "", response.text.strip(), flags=re.MULTILINE).strip()
-    return clean_text
+    clean_text = response.text.strip()
+    # Remove code block markers if present
+    if clean_text.startswith("```"):
+        clean_text = re.sub(r"^```[a-zA-Z]*\n?", "", clean_text)
+        clean_text = re.sub(r"```$", "", clean_text)
+    return clean_text.strip()
 
+def process_resume(file_path, job_description=None):
+    # Read PDF file as bytes
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
 
-# 🚀 Streamlit App
-st.title("📄 ATS SCORE")
-st.markdown("Upload a resume PDF")
+    # Extract text from PDF
+    print("🔍 Extracting text from PDF...")
+    resume_text = extract_text_from_pdf(file_bytes)
 
-option = st.radio("Select an option:", ["Check ATS Score Only", "Match Resume with Job Description"])
-uploaded_file = st.file_uploader("Drag and drop a resume PDF here", type=["pdf"])
-
-job_description = ""
-if option == "Match Resume with Job Description":
-    job_description = st.text_area("Enter the job description:", height=200)
-
-if uploaded_file is not None:
-    with st.spinner("🔍 Extracting text from PDF..."):
-        resume_bytes = uploaded_file.read()
-        resume_text = extract_text_from_pdf(uploaded_file)
-
-    with st.spinner("🤖 Parsing resume with Gemini..."):
-        parsed_json_text = parse_resume_with_gemini(resume_text)
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-        temp_file.write(resume_bytes)
-        temp_path = temp_file.name
-
+    # Parse resume with Gemini
+    print("🤖 Parsing resume with Gemini...")
+    parsed_json_text = parse_resume_with_gemini(resume_text)
     try:
         parsed_output = json.loads(parsed_json_text)
-        Grammatical_score =  parsed_output.get("Total Score", None)
-        st.success("✅ Resume successfully parsed!")
-        st.subheader("🧾 Parsed Resume (JSON):")
-        st.json(parsed_output)
-        if Grammatical_score:
-            st.info(f"**Score Breakdown:** `{Grammatical_score}`")
-
-        st.subheader("📊 ATS Score:")
-        ats_score = calculate_score(parsed_output, analyze_resume(temp_path),Grammatical_score)
-        st.write(f"**Score:** {ats_score}/100")
-
-        if option == "Match Resume with Job Description" and job_description:
-            st.subheader("🔍 Job Description Match Score:")
-            # Here you can add logic to compare parsed_output with job_description and compute a match score
-            # For now, we'll just display a placeholder score
-            match_score = 85  # Placeholder score
-            #st.write(f"**Match Score:** {get_jd_match_score(job_description, parsed_output, "AIzaSyDXlJv-M3hiw-kLSWfpd0xQgk4Ssz7G8Fo")}/100")
-
     except Exception as e:
-        st.error("⚠️ Failed to parse JSON output.")
-        st.text(f"Raw Output:\n{parsed_json_text}")
-        st.text(f"Error: {e}")
+        print("⚠️ Failed to parse JSON output.")
+        print(f"Raw Output:\n{parsed_json_text}")
+        print(f"Error: {e}")
+        return
+
+    print("✅ Resume successfully parsed!")
+    print("🧾 Parsed Resume (JSON):")
+    print(json.dumps(parsed_output, indent=2, ensure_ascii=False))
 
 
-# if __name__ == "__main__":
-#     st.set_page_config(page_title="ATS Resume Evaluator")
-#     st.title("📄 AI Resume Evaluator")
-#     uploaded_file = st.file_uploader("Upload your resume (PDF only)", type="pdf")
+    # Output Score Breakdown (Total Score)
+    total_score = parsed_output.get("Total Score", None)
+    if total_score is not None:
+        print(f"\n**Score Breakdown:** {total_score}/100")
 
-#     if uploaded_file:
-#         with tempfile.NamedTemporaryFile(delete=False) as tmp:
-#             tmp.write(uploaded_file.read())
-#             tmp_path = tmp.name
+    # Extract scores for ATS calculation
+    misc = parsed_output.get("Miscellaneous Score", {})
+    format_score = misc.get("ATS Parse Rate", {}).get("score", 0)
+    grammatical_score = misc.get("Grammar and Language", {}).get("score", 0)
 
-#         with fitz.open(tmp_path) as doc:
-#             text = ""
-#             for page in doc:
-#                 text += page.get_text()
+    # ATS Score
+    print("\n📊 ATS Score:")
+    calculate_score(
+        parsed_output.get("Extracted Data", {}),
+        format_score,
+        grammatical_score,
+        skills_weight=0.3,
+        achievement_weight=0.15,
+        experience_weight=0.2,
+        project_weight=0.2,
+        certification_weight=0.1
+    )
 
-#         # Call Gemini parser
-#         model = genai.GenerativeModel('gemini-1.5-flash')
-#         parsed = model.generate_content(PROMPT_TEMPLATE + text).text
+    # Job Description Match
+    if job_description:
+        print("\n🔍 Job Description Match Score:")
+        jd_score = get_jd_match_score(job_description, parsed_output, "AIzaSyDXlJv-M3hiw-kLSWfpd0xQgk4Ssz7G8Fo")
+        print(f"**Match Score:** {jd_score}/100")
 
-#         # Parse & score
-#         format_score = analyze_resume(text)
-#         final_score = calculate_score(parsed, format_score)
+# === Example Usage ===
+# process_resume("/path/to/your_resume.pdf", job_description="The JD goes here")
 
-#         st.subheader("🎯 ATS Score")
-#         st.write(f"**Final Score**: {final_score}/100")
-#         st.json(parsed)
+if __name__ == "__main__":
+    pdf_path = input("Enter the path to your resume PDF: ").strip()
+    analyze_resume(pdf_path, bullet_threshold=20)
+    jd_text = input("Enter the job description (or leave blank to skip JD matching): ").strip()
+    process_resume(pdf_path, job_description=jd_text if jd_text else None)
